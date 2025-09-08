@@ -1,239 +1,39 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import Peer from 'peerjs';
-import type { DataConnection } from 'peerjs';
+import { useState, useEffect, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
-import './App.css'; // Assuming you have your CSS set up
+import { usePeerStore, getRememberedPeers } from './store';
+import './App.css';
 
-// --- Helper Functions for Local Storage ---
-const MY_PEER_ID_KEY = 'myPeerId';
-const REMEMBERED_PEERS_KEY = 'rememberedPeerConnections';
-
-function getMyStoredPeerId(): string | null {
-  return localStorage.getItem(MY_PEER_ID_KEY);
-}
-
-function setMyStoredPeerId(id: string) {
-  localStorage.setItem(MY_PEER_ID_KEY, id);
-}
-
-function getRememberedPeers(): string[] {
-  try {
-    const stored = localStorage.getItem(REMEMBERED_PEERS_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch (e) {
-    console.error("Failed to parse remembered peers from localStorage", e);
-    return [];
-  }
-}
-
-function addRememberedPeer(id: string) {
-  const currentPeers = getRememberedPeers();
-  if (!currentPeers.includes(id)) {
-    const newPeers = [...currentPeers, id];
-    localStorage.setItem(REMEMBERED_PEERS_KEY, JSON.stringify(newPeers));
-  }
-}
-
-function removeRememberedPeer(id: string) {
-  const currentPeers = getRememberedPeers();
-  const newPeers = currentPeers.filter(peerId => peerId !== id);
-  localStorage.setItem(REMEMEBERED_PEERS_KEY, JSON.stringify(newPeers));
-}
-
-// Function to generate a UUID (simple version, for production consider a dedicated library or crypto.randomUUID)
-function generateUUID(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0,
-      v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-}
-
-// --- App Component ---
 function App() {
-  const [peerId, setPeerId] = useState('');
-  const [remotePeerIdInput, setRemotePeerIdInput] = useState(''); // Changed name to avoid confusion with actual remotePeerId
-  const [connections, setConnections] = useState<Record<string, DataConnection>>({});
+  // --- State from Zustand store ---
+  const {
+    peerId,
+    connections,
+    messages,
+    isConnecting,
+    reconnectionAttempts,
+    initializePeer,
+    destroyPeer,
+    connectToPeer,
+    sendMessage,
+    forgetPeer,
+  } = usePeerStore();
+
+  // --- Local UI state ---
+  const [remotePeerIdInput, setRemotePeerIdInput] = useState('');
   const [messageInput, setMessageInput] = useState('');
-  const [messages, setMessages] = useState<string[]>([]);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
 
-  const peerInstance = useRef<Peer | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
 
-  // Store retry attempts for auto-reconnection
-  const reconnectionAttempts = useRef<Record<string, number>>({});
-  const reconnectionTimers = useRef<Record<string, NodeJS.Timeout>>({}); // NodeJS.Timeout for better type safety with setTimeout
-  const MAX_RETRY_ATTEMPTS = 10;
-  const RETRY_INTERVAL_BASE_MS = 3000; // Base interval for retries
-
-  // --- Connection Setup Logic (Memoized) ---
-  const setupConnection = useCallback((conn: DataConnection, isRememberedConnection = false) => {
-    conn.on('open', () => {
-      console.log(`Connection to ${conn.peer} is open.`);
-      setConnections(prev => ({ ...prev, [conn.peer]: conn }));
-      addRememberedPeer(conn.peer); // Remember this peer
-
-      // Clear any pending reconnection attempts/timers if successful
-      if (reconnectionTimers.current[conn.peer]) {
-        clearTimeout(reconnectionTimers.current[conn.peer]);
-        delete reconnectionTimers.current[conn.peer];
-      }
-      if (reconnectionAttempts.current[conn.peer]) {
-        delete reconnectionAttempts.current[conn.peer];
-      }
-    });
-
-    conn.on('data', (data) => {
-      console.log(`Received data from ${conn.peer}:`, data);
-      setMessages(prev => [...prev, `${conn.peer}: ${data}`]);
-    });
-
-    conn.on('close', () => {
-      console.log(`Connection to ${conn.peer} has closed.`);
-      setConnections(prev => {
-        const newConns = { ...prev };
-        delete newConns[conn.peer];
-        return newConns;
-      });
-      // If this was a remembered peer, try to reconnect
-      if (getRememberedPeers().includes(conn.peer)) {
-        scheduleReconnect(conn.peer);
-      }
-    });
-
-    conn.on('error', (err) => {
-      console.error(`Connection error with ${conn.peer}:`, err);
-      // If this was a remembered peer, try to reconnect
-      if (getRememberedPeers().includes(conn.peer)) {
-        scheduleReconnect(conn.peer);
-      }
-    });
-  }, []); // Empty dependency array as setupConnection itself is not dependent on external state, but its logic uses callbacks
-
-  // --- Peer Connection Logic (Memoized) ---
-  const connectToPeer = useCallback((peerIdToConnect: string, isRetry = false) => {
-    if (!peerIdToConnect || peerIdToConnect === peerId) {
-      if (peerIdToConnect === peerId) alert("You cannot connect to yourself.");
-      else if (!isRetry) alert('Please enter or scan a valid remote Peer ID.'); // Don't alert for retries
-      return;
-    }
-
-    // Prevent connecting if already connected or currently attempting
-    if (connections[peerIdToConnect] && connections[peerIdToConnect].open) {
-      console.log(`Already connected to ${peerIdToConnect}`);
-      return;
-    }
-    // Check if a connection attempt is already in progress
-    if (peerInstance.current && peerInstance.current.connections[peerIdToConnect] && peerInstance.current.connections[peerIdToConnect].length > 0) {
-      // Find if there's an open or connecting data connection
-      const existingDataConns = peerInstance.current.connections[peerIdToConnect].filter(c => c.type === 'data');
-      if (existingDataConns.some(conn => conn.open || conn.reliable)) { // `reliable` is true during connection setup
-        console.log(`Connection or attempt to ${peerIdToConnect} already exists.`);
-        return;
-      }
-    }
-
-
-    if (!peerInstance.current) {
-      console.warn('Peer instance not ready for connection.');
-      // If it's a remembered peer, we might want to retry later when peerInstance is ready
-      if (getRememberedPeers().includes(peerIdToConnect)) {
-        scheduleReconnect(peerIdToConnect);
-      }
-      return;
-    }
-
-    console.log(`Connecting to ${peerIdToConnect}...`);
-    const conn = peerInstance.current.connect(peerIdToConnect, {
-      reliable: true,
-    });
-    setupConnection(conn, getRememberedPeers().includes(peerIdToConnect));
-
-  }, [peerId, connections, setupConnection]); // Include peerId and connections in dependencies
-
-  // --- Reconnection Scheduler ---
-  const scheduleReconnect = useCallback((remotePeer: string) => {
-    reconnectionAttempts.current[remotePeer] = (reconnectionAttempts.current[remotePeer] || 0) + 1;
-
-    if (reconnectionAttempts.current[remotePeer] <= MAX_RETRY_ATTEMPTS) {
-      const delay = RETRY_INTERVAL_BASE_MS * reconnectionAttempts.current[remotePeer]; // Exponential backoff
-      console.warn(`Attempting to reconnect to ${remotePeer} (Attempt ${reconnectionAttempts.current[remotePeer]}/${MAX_RETRY_ATTEMPTS}) in ${delay / 1000}s...`);
-
-      // Clear any existing timer for this peer before setting a new one
-      if (reconnectionTimers.current[remotePeer]) {
-        clearTimeout(reconnectionTimers.current[remotePeer]);
-      }
-      reconnectionTimers.current[remotePeer] = setTimeout(() => {
-        connectToPeer(remotePeer, true); // Mark as retry
-      }, delay);
-    } else {
-      console.error(`Max reconnection attempts reached for ${remotePeer}. Giving up.`);
-      // Optionally, you might want to ask the user if they want to 'forget' this peer,
-      // or just stop trying until explicit action.
-      // For now, it will stop retrying until next page load or manual connect.
-      if (reconnectionTimers.current[remotePeer]) {
-        clearTimeout(reconnectionTimers.current[remotePeer]);
-        delete reconnectionTimers.current[remotePeer];
-      }
-      if (reconnectionAttempts.current[remotePeer]) {
-        delete reconnectionAttempts.current[remotePeer];
-      }
-    }
-  }, [connectToPeer]);
-
-  // --- Initial PeerJS Setup (on Mount) ---
+  // --- Lifecycle Effect for PeerJS ---
   useEffect(() => {
-    let storedId = getMyStoredPeerId();
-    if (!storedId) {
-      storedId = generateUUID();
-      setMyStoredPeerId(storedId);
-    }
-
-    const peer = new Peer(storedId, { // Use the stable ID
-      debug: 2,
-      config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-        ],
-      },
-    });
-
-    peer.on('open', (id) => {
-      console.log('My peer ID is: ' + id);
-      setPeerId(id);
-      // Ensure the stored ID matches the one PeerJS actually opens (in case of conflict)
-      if (id !== storedId) {
-        setMyStoredPeerId(id);
-        console.warn(`PeerJS opened with a different ID than stored. Using new ID: ${id}`);
-      }
-    });
-
-    peer.on('connection', (conn) => {
-      console.log(`Incoming connection from ${conn.peer}`);
-      setupConnection(conn, true); // Incoming connections are always "remembered" implicitly by design
-    });
-
-    peer.on('error', (err) => {
-      console.error('PeerJS error:', err);
-      // alert(`An error occurred with PeerJS: ${err.message}`); // Only alert for critical errors, not connection retries
-    });
-
-    peerInstance.current = peer;
-
+    initializePeer();
     return () => {
-      // Clear all pending reconnection timers on component unmount
-      Object.values(reconnectionTimers.current).forEach(timer => clearTimeout(timer));
-      reconnectionTimers.current = {};
-      reconnectionAttempts.current = {};
-
-      peer.destroy();
+      destroyPeer();
     };
-  }, [setupConnection]); // setupConnection is a dependency because it's used inside this effect
+  }, [initializePeer, destroyPeer]);
 
   // --- Auto-scroll messages ---
   useEffect(() => {
@@ -246,23 +46,16 @@ function App() {
       const onScanSuccess = (decodedText: string) => {
         console.log(`QR Code detected: ${decodedText}`);
         setRemotePeerIdInput(decodedText);
-        connectToPeer(decodedText); // Auto-connect after scanning
-        setIsScannerOpen(false); // Close scanner on success
-      };
-
-      const onScanFailure = (error: string) => {
-        // console.warn(`QR scan error: ${error}`); // This callback is called frequently, so keep it quiet
+        connectToPeer(decodedText);
+        setIsScannerOpen(false);
       };
 
       const scanner = new Html5QrcodeScanner(
         'qr-reader',
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 250 },
-        },
-        /* verbose= */ false
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        false
       );
-      scanner.render(onScanSuccess, onScanFailure);
+      scanner.render(onScanSuccess, () => {});
       scannerRef.current = scanner;
     }
 
@@ -274,70 +67,27 @@ function App() {
         scannerRef.current = null;
       }
     };
-  }, [isScannerOpen, connectToPeer]); // connectToPeer is a dependency here
-
-  // --- Auto-reconnect to remembered peers when `peerId` is established ---
-  useEffect(() => {
-    if (peerId && peerInstance.current) {
-      const remembered = getRememberedPeers();
-      remembered.forEach(id => {
-        console.log(`Attempting to auto-reconnect to remembered peer: ${id}`);
-        // Only try to connect if not already connected or actively trying
-        if (!(connections[id] && connections[id].open) && !reconnectionTimers.current[id]) {
-          connectToPeer(id);
-        }
-      });
-    }
-  }, [peerId, connectToPeer, connections]); // Trigger when local peerId is set or connections change
+  }, [isScannerOpen, connectToPeer]);
 
   // --- Handlers ---
   const handleConnect = () => {
-    connectToPeer(remotePeerIdInput);
+    if (remotePeerIdInput) {
+      connectToPeer(remotePeerIdInput);
+      setRemotePeerIdInput('');
+    } else {
+      alert('Please enter or scan a valid remote Peer ID.');
+    }
   };
 
   const handleSendMessage = () => {
     if (messageInput) {
-      const messageWithSender = `You: ${messageInput}`;
-      setMessages(prev => [...prev, messageWithSender]);
-
-      Object.values(connections).forEach(conn => {
-        if (conn.open) {
-          conn.send(messageInput);
-        } else {
-          console.warn(`Attempted to send message to closed connection ${conn.peer}.`);
-        }
-      });
+      sendMessage(messageInput);
       setMessageInput('');
     }
   };
 
-  const handleForgetPeer = (idToForget: string) => {
-    // 1. Close the connection if open
-    if (connections[idToForget] && connections[idToForget].open) {
-      connections[idToForget].close();
-    }
-    // 2. Remove from remembered peers in localStorage
-    removeRememberedPeer(idToForget);
-    // 3. Update UI state (connections will update via conn.on('close'))
-    setConnections(prev => {
-      const newConns = { ...prev };
-      delete newConns[idToForget];
-      return newConns;
-    });
-    // 4. Clear any pending reconnection attempts/timers
-    if (reconnectionTimers.current[idToForget]) {
-      clearTimeout(reconnectionTimers.current[idToForget]);
-      delete reconnectionTimers.current[idToForget];
-    }
-    if (reconnectionAttempts.current[idToForget]) {
-      delete reconnectionAttempts.current[idToForget];
-    }
-    console.log(`Forgot peer: ${idToForget}`);
-  };
-
-
   const connectedPeers = Object.keys(connections);
-  const allRememberedPeers = getRememberedPeers(); // Get the full list for displaying status
+  const allRememberedPeers = getRememberedPeers();
 
   return (
     <div className="bg-gray-100 text-gray-800 font-sans p-4 md:p-8 min-h-screen">
@@ -382,6 +132,7 @@ function App() {
                 className="p-2 border border-gray-300 rounded-l-md w-full focus:ring-blue-500 focus:border-blue-500"
                 value={remotePeerIdInput}
                 onChange={(e) => setRemotePeerIdInput(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleConnect()}
               />
               <button
                 onClick={handleConnect}
@@ -401,27 +152,34 @@ function App() {
           <div className="bg-white rounded-lg shadow-md p-6">
             <h2 className="text-2xl font-semibold text-gray-700 mb-3">Connection Status</h2>
             <ul className="list-none p-0">
-              {allRememberedPeers.length === 0 && connectedPeers.length === 0 ? (
-                <li className="bg-gray-100 text-gray-500 p-3 rounded-md">Not connected to any peers and no remembered peers.</li>
+              {allRememberedPeers.length === 0 ? (
+                <li className="bg-gray-100 text-gray-500 p-3 rounded-md">No remembered peers. Connect to a device to get started.</li>
               ) : (
-                allRememberedPeers.map(peerId => {
-                  const conn = connections[peerId];
-                  const isConnected = conn && conn.open;
-                  const isConnecting = (peerInstance.current && peerInstance.current.connections[peerId] && peerInstance.current.connections[peerId].length > 0 && !isConnected) || reconnectionTimers.current[peerId];
+                allRememberedPeers.map(id => {
+                  const isConnected = connections[id]?.open;
+                  const connecting = isConnecting[id];
+                  const retrying = reconnectionAttempts[id] > 0;
                   const baseClasses = 'p-3 rounded-md mb-2 text-sm break-all flex justify-between items-center';
 
+                  let statusText = 'Offline';
+                  let statusClass = 'bg-red-100 text-red-800';
+
+                  if (isConnected) {
+                    statusText = 'Connected to';
+                    statusClass = 'bg-green-100 text-green-800 font-semibold';
+                  } else if (connecting || retrying) {
+                    statusText = `Connecting to`;
+                    statusClass = 'bg-yellow-100 text-yellow-800';
+                  }
+
                   return (
-                    <li key={peerId} className={`${isConnected ? 'bg-green-100 text-green-800 font-semibold' :
-                      isConnecting ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-red-100 text-red-800'} ${baseClasses}`}>
+                    <li key={id} className={`${statusClass} ${baseClasses}`}>
                       <span>
-                        {isConnected ? 'Connected to' :
-                          isConnecting ? `Attempting to connect to` :
-                            'Offline (Remembered)'} {peerId}
-                        {isConnecting && reconnectionAttempts.current[peerId] > 1 && ` (Retry ${reconnectionAttempts.current[peerId]})`}
+                        {statusText} {id}
+                        {retrying && ` (Retry ${reconnectionAttempts[id]})`}
                       </span>
                       <button
-                        onClick={() => handleForgetPeer(peerId)}
+                        onClick={() => forgetPeer(id)}
                         className="ml-2 px-3 py-1 bg-gray-200 text-gray-700 rounded-md text-xs hover:bg-gray-300"
                         title="Forget this peer"
                       >
@@ -446,12 +204,12 @@ function App() {
               value={messageInput}
               onChange={(e) => setMessageInput(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-              disabled={connectedPeers.length === 0} // Disable if no connections
+              disabled={connectedPeers.length === 0}
             />
             <button
               onClick={handleSendMessage}
               className="px-4 py-2 bg-green-500 text-white rounded-r-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50"
-              disabled={connectedPeers.length === 0} // Disable if no connections
+              disabled={connectedPeers.length === 0}
             >
               Send to All
             </button>

@@ -4,7 +4,9 @@ import tailwindcss from '@tailwindcss/vite'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss(),],
+  base: "/tibidi/",
   build: {
+
     outDir: './docs',
     emptyOutDir: true, // also necessary
   }

@@ -168,13 +168,29 @@ export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
         storedId = generateUUID();
         setMyStoredPeerId(storedId);
       }
-
+      const turnUsername = "[1757443001]:cannbl";
+      const turnPassword = "z+yFJ12W4LnT8BxwkMUV/VM7Sp0=";
       const peer = new Peer(storedId, {
         debug: 2,
         config: {
           iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
+            // Your TURN server with credentials
+            {
+              urls: "turn:coturn.fubar.online:3478",
+              username: turnUsername,
+              credential: turnPassword,
+            },
+            // Your STUN server
+            {
+              urls: "stun:coturn.fubar.online:3478",
+            },
+            // // Fallback STUN servers
+            // {
+            //   urls: 'stun:stun.l.google.com:19302'
+            // },
+            // {
+            //   urls: 'stun:stun1.l.google.com:19302'
+            // },
           ],
         },
       });

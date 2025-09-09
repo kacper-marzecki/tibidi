@@ -59,7 +59,7 @@ interface PeerState {
   messages: string[];
   isConnecting: Record<string, boolean>;
   reconnectionAttempts: Record<string, number>;
-  reconnectionTimers: Record<string, NodeJS.Timeout>;
+  reconnectionTimers: Record<string, number>;
 }
 
 interface PeerActions {

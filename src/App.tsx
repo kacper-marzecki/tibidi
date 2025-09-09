@@ -55,7 +55,7 @@ function App() {
         { fps: 10, qrbox: { width: 250, height: 250 } },
         false
       );
-      scanner.render(onScanSuccess, () => {});
+      scanner.render(onScanSuccess, () => { });
       scannerRef.current = scanner;
     }
 
@@ -95,7 +95,7 @@ function App() {
       {isScannerOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
           <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md">
-            <h3 className="text-xl font-semibold mb-4 text-center">Scan Peer ID QR Code</h3>
+            <h3 className="text-xl font-semibold mb-4 text-center">Scan Peer ID QR Code v1</h3>
             <div id="qr-reader" className="w-full"></div>
             <button
               onClick={() => setIsScannerOpen(false)}

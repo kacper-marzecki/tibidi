@@ -168,10 +168,10 @@ export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
         storedId = generateUUID();
         setMyStoredPeerId(storedId);
       }
-      const turnUsername = "[1757443001]:cannbl";
-      const turnPassword = "z+yFJ12W4LnT8BxwkMUV/VM7Sp0=";
+      const turnUsername = "1757534482:testuser";
+      const turnPassword = "mHGqjUySxm/JpHI223rBraoP3Z4=";
       const peer = new Peer(storedId, {
-        debug: 2,
+        debug: 3,
         config: {
           iceServers: [
             // Your TURN server with credentials

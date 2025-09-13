@@ -19,6 +19,12 @@ export interface PersistedGroup {
   events: GroupEvent[];
 }
 
+// This is the full persisted application state
+export interface PersistedState {
+  groups: Record<string, PersistedGroup>;
+  activeGroupId: string | null;
+}
+
 // This is the full group state including runtime properties
 export interface Group extends PersistedGroup {
   peer: Peer | null;

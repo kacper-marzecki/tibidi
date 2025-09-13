@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { DataConnection } from 'peerjs';
 import Peer from 'peerjs';
-import type { Group, GroupEvent, P2PMessage, PersistedGroup } from './types';
+import type { Group, GroupEvent, P2PMessage, PersistedGroup, PersistedState } from './types';
 
 // --- Helper Functions ---
 
@@ -16,25 +16,48 @@ function generateUUID(): string {
   });
 }
 
-const P2P_GROUPS_KEY = 'p2p_groups';
+const APP_STATE_KEY = 'APP_STATE';
 
-function getStoredGroups(): Record<string, PersistedGroup> {
+function getStoredState(): PersistedState {
   try {
-    const stored = localStorage.getItem(P2P_GROUPS_KEY);
-    return stored ? JSON.parse(stored) : {};
+    const stored = localStorage.getItem(APP_STATE_KEY);
+    console.log("###############", stored)
+    const defaultState: PersistedState = { groups: {}, activeGroupId: null };
+    if (!stored) return defaultState;
+
+    const parsed = JSON.parse(stored);
+    console.log("PARSED", parsed)
+    // Basic validation to prevent app crash on malformed state
+    if (parsed) {
+      console.log("RETURNING PARSED", parsed)
+      return parsed;
+    }
+    return defaultState;
   } catch (e) {
-    console.error("Failed to parse groups from localStorage", e);
-    return {};
+    console.error("Failed to parse state from localStorage", e);
+    return { groups: {}, activeGroupId: null };
   }
 }
 
-function saveStoredGroups(groups: Record<string, Group>) {
+function saveStoredState(state: PeerState) {
+  if (Object.keys(state.groups).length == 0) {
+    return
+  }
   const persistedGroups: Record<string, PersistedGroup> = {};
-  for (const groupId in groups) {
-    const { id, name, myPeerId, events } = groups[groupId];
+  for (const groupId in state.groups) {
+    const { id, name, myPeerId, events } = state.groups[groupId];
     persistedGroups[groupId] = { id, name, myPeerId, events };
   }
-  localStorage.setItem(P2P_GROUPS_KEY, JSON.stringify(persistedGroups));
+  const persistedState: PersistedState = {
+    groups: persistedGroups,
+    activeGroupId: state.activeGroupId,
+  };
+  localStorage.setItem(APP_STATE_KEY, JSON.stringify(persistedState));
+  console.log("###### after save", localStorage.getItem(APP_STATE_KEY));
+  setTimeout(() => {
+    console.log("###### after save", localStorage.getItem(APP_STATE_KEY));
+
+  }, 500)
 }
 
 // --- Store Definition ---
@@ -78,7 +101,11 @@ const sortEvents = (events: GroupEvent[]) =>
     return a.authorPeerId.localeCompare(b.authorPeerId);
   });
 
-export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
+export const usePeerStore = create<PeerState & PeerActions>((setZ, get) => {
+  const set = (s: Parameters<typeof setZ>[0]) => {
+    setZ(s)
+    // saveStoredState(get())
+  }
   let reconnectInterval: number | undefined;
 
   const _updateGroupState = (groupId: string, newProps: Partial<Group>) => {
@@ -88,7 +115,7 @@ export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
       const newGroups = { ...state.groups, [groupId]: updatedGroup };
       // Persist changes to events or core properties
       if (newProps.events || newProps.name) {
-        saveStoredGroups(newGroups);
+        saveStoredState({ ...state, groups: newGroups });
       }
       return { groups: newGroups };
     });
@@ -174,6 +201,7 @@ export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
     });
 
     conn.on('close', () => {
+      console.log("CLOSE")
       const group = get().groups[groupId];
       if (!group) return; // Group was left, no need to reconnect.
 
@@ -240,7 +268,7 @@ export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
 
     // --- Actions ---
     initializeStore: () => {
-      const storedGroups = getStoredGroups();
+      const { groups: storedGroups, activeGroupId: storedActiveGroupId } = getStoredState();
       const runtimeGroups: Record<string, Group> = {};
 
       for (const groupId in storedGroups) {
@@ -251,8 +279,12 @@ export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
           isConnecting: {},
         };
       }
+      // If the last active group still exists, set it as active.
+      const activeGroupId = storedActiveGroupId && runtimeGroups[storedActiveGroupId]
+        ? storedActiveGroupId
+        : null;
 
-      set({ groups: runtimeGroups });
+      set({ groups: runtimeGroups, activeGroupId });
 
       // Initialize PeerJS for each group
       Object.keys(runtimeGroups).forEach(groupId => _initializePeerForGroup(groupId));
@@ -290,7 +322,8 @@ export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
       Object.values(groups).forEach(group => {
         group.peer?.destroy();
       });
-      set({ groups: {}, activeGroupId: null });
+      // set({ groups: {}, activeGroupId: null });
+      // localStorage.removeItem(APP_STATE_KEY);
     },
 
     createGroup: (name) => {
@@ -315,12 +348,13 @@ export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
         isConnecting: {},
       };
 
-      set(state => ({
-        groups: { ...state.groups, [groupId]: newGroup },
-        activeGroupId: groupId,
-      }));
+      set(state => {
+        const newGroups = { ...state.groups, [groupId]: newGroup };
+        const newState = { groups: newGroups, activeGroupId: groupId };
+        saveStoredState(newState);
+        return newState;
+      });
 
-      saveStoredGroups(get().groups);
       _initializePeerForGroup(groupId);
     },
 
@@ -335,6 +369,7 @@ export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
         if (get().groups[groupId]) {
           console.warn(`Already a member of group ${groupId}. Connecting if not already connected.`);
           get().connectToPeer(groupId, remotePeerId);
+          get().setActiveGroup(groupId);
           return;
         }
 
@@ -349,10 +384,12 @@ export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
           isConnecting: {},
         };
 
-        set(state => ({
-          groups: { ...state.groups, [groupId]: newGroup },
-          activeGroupId: groupId,
-        }));
+        set(state => {
+          const newGroups = { ...state.groups, [groupId]: newGroup };
+          const newState = { groups: newGroups, activeGroupId: groupId };
+          saveStoredState(newState);
+          return newState;
+        });
 
         _initializePeerForGroup(groupId, remotePeerId);
 
@@ -374,17 +411,22 @@ export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
 
         const newActiveGroupId = state.activeGroupId === groupId ? null : state.activeGroupId;
 
-        saveStoredGroups(newGroups);
-
-        return {
+        const newState = {
           groups: newGroups,
           activeGroupId: newActiveGroupId,
         };
+        saveStoredState(newState);
+
+        return newState;
       });
     },
 
     setActiveGroup: (groupId) => {
-      set({ activeGroupId: groupId });
+      set(state => {
+        const newState = { ...state, activeGroupId: groupId };
+        saveStoredState(newState);
+        return { activeGroupId: groupId };
+      });
     },
 
     addEventAndBroadcast: (groupId, type, payload) => {

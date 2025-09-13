@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { usePeerStore, getRememberedPeers } from './store';
-import './App.css';
 
 function App() {
   // --- State from Zustand store ---
@@ -75,7 +74,7 @@ function App() {
       connectToPeer(remotePeerIdInput);
       setRemotePeerIdInput('');
     } else {
-      alert('Please enter or scan a valid remote Peer ID.');
+      alert('Please enter a Peer ID.');
     }
   };
 
@@ -90,16 +89,16 @@ function App() {
   const allRememberedPeers = getRememberedPeers();
 
   return (
-    <div className="bg-gray-100 text-gray-800 font-sans p-4 md:p-8 min-h-screen">
+    <div className="p-4 max-w-lg mx-auto flex flex-col gap-6">
       {/* Scanner Modal */}
       {isScannerOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
-          <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md">
-            <h3 className="text-xl font-semibold mb-4 text-center">Scan Peer ID QR Code v1</h3>
-            <div id="qr-reader" className="w-full"></div>
+        <div className="fixed inset-0 bg-black/75 flex justify-center items-center z-50 p-4">
+          <div className="bg-white border-[3px] border-black p-6 w-full max-w-[400px] text-center">
+            <h3 className="text-lg font-bold mb-4">SCAN QR CODE</h3>
+            <div id="qr-reader" className="border-[3px] border-black mb-4"></div>
             <button
               onClick={() => setIsScannerOpen(false)}
-              className="mt-4 w-full px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50"
+              className="py-[0.8rem] px-[1.2rem] border-[3px] text-center cursor-pointer uppercase text-[10px] active:not(:disabled):translate-y-[2px] disabled:bg-gray-200 disabled:text-gray-400 disabled:border-gray-400 disabled:cursor-not-allowed bg-[#eb5757] text-white border-black hover:not(:disabled):bg-[#f47f7f] mt-4 w-full"
             >
               Cancel
             </button>
@@ -107,100 +106,101 @@ function App() {
         </div>
       )}
 
-      <h1 className="text-3xl font-bold text-gray-700 mb-6 text-center">P2P Task List - Device Pairing</h1>
+      <h1 className="text-2xl font-bold text-center uppercase">P2P Link</h1>
 
-      <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Left Column for Connection Management */}
-        <div className="flex flex-col gap-6">
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-2xl font-semibold text-gray-700 mb-3">Your Device</h2>
-            <p>Your Peer ID: <strong className="font-bold text-blue-600 break-all">{peerId || 'Initializing...'}</strong></p>
-            {peerId && (
-              <div className="mt-4 p-4 bg-gray-50 rounded-md flex justify-center">
-                <QRCodeSVG value={peerId} size={160} bgColor="#f9fafb" fgColor="#1f2937" />
-              </div>
-            )}
-            <p className="text-sm text-gray-500 mt-2">Share this ID or let another user scan this QR code to connect.</p>
-          </div>
-
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-2xl font-semibold text-gray-700 mb-3">Connect to another Device</h2>
-            <div className="flex items-center">
-              <input
-                type="text"
-                placeholder="Enter another user's Peer ID"
-                className="p-2 border border-gray-300 rounded-l-md w-full focus:ring-blue-500 focus:border-blue-500"
-                value={remotePeerIdInput}
-                onChange={(e) => setRemotePeerIdInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleConnect()}
-              />
-              <button
-                onClick={handleConnect}
-                className="px-4 py-2 bg-blue-500 text-white rounded-r-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
-              >
-                Connect
-              </button>
+      <div className="flex flex-col gap-10 ">
+        {/* Your Device Panel */}
+        <div className="bg-white border-[3px] border-black p-4 w-full">
+          <h2 className="text-lg font-bold mb-3">YOUR ID</h2>
+          <p className="text-xs break-all mb-3">{peerId || 'Initializing...'}</p>
+          {peerId && (
+            <div className="flex justify-center bg-gray-200 p-4 border-2 border-black">
+              <QRCodeSVG value={peerId} size={128} bgColor="transparent" fgColor="#212529" style={{ imageRendering: 'pixelated' }} />
             </div>
+          )}
+          <p className="text-xs mt-2">Share this ID or QR code to connect.</p>
+        </div>
+
+        {/* Connect Panel */}
+        <div className="bg-white border-[3px] border-black p-4 w-full">
+          <h2 className="text-lg font-bold mb-3">CONNECT TO PEER</h2>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="Enter Peer ID..."
+              className="p-[0.8rem] border-[3px] border-black bg-white w-full text-[10px] focus:outline-[3px] focus:outline-[#2f80ed] focus:outline-offset-[-3px]"
+              value={remotePeerIdInput}
+              onChange={(e) => setRemotePeerIdInput(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleConnect()}
+            />
             <button
-              onClick={() => setIsScannerOpen(true)}
-              className="mt-4 w-full px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-50"
+              onClick={handleConnect}
+              className="py-[0.8rem] px-[1.2rem] border-[3px] text-center cursor-pointer uppercase text-[10px] active:not(:disabled):translate-y-[2px] disabled:bg-gray-200 disabled:text-gray-400 disabled:border-gray-400 disabled:cursor-not-allowed bg-[#2f80ed] text-white border-black hover:not(:disabled):bg-[#5b9eff]"
             >
-              Scan QR Code
+              Link
             </button>
           </div>
+          <button
+            onClick={() => setIsScannerOpen(true)}
+            className="py-[0.8rem] px-[1.2rem] border-[3px] border-black text-center cursor-pointer bg-white text-black uppercase text-[10px] hover:not(:disabled):bg-gray-200 active:not(:disabled):translate-y-[2px] disabled:bg-gray-200 disabled:text-gray-400 disabled:border-gray-400 disabled:cursor-not-allowed mt-2 w-full"
+          >
+            Scan QR
+          </button>
+        </div>
 
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-2xl font-semibold text-gray-700 mb-3">Connection Status</h2>
-            <ul className="list-none p-0">
-              {allRememberedPeers.length === 0 ? (
-                <li className="bg-gray-100 text-gray-500 p-3 rounded-md">No remembered peers. Connect to a device to get started.</li>
-              ) : (
-                allRememberedPeers.map(id => {
-                  const isConnected = connections[id]?.open;
-                  const connecting = isConnecting[id];
-                  const retrying = reconnectionAttempts[id] > 0;
-                  const baseClasses = 'p-3 rounded-md mb-2 text-sm break-all flex justify-between items-center';
+        {/* Connections Panel */}
+        <div className="bg-white border-[3px] border-black p-4 w-full">
+          <h2 className="text-lg font-bold mb-3">CONNECTIONS</h2>
+          <div>
+            {allRememberedPeers.length === 0 ? (
+              <p className="text-xs text-gray-500">No remembered peers.</p>
+            ) : (
+              allRememberedPeers.map(id => {
+                const isConnected = connections[id]?.open;
+                const connecting = isConnecting[id];
+                const retrying = reconnectionAttempts[id] > 0;
 
-                  let statusText = 'Offline';
-                  let statusClass = 'bg-red-100 text-red-800';
+                let statusText = 'OFFLINE';
+                let statusClasses = 'bg-[#f8d7da] border-[#eb5757]';
 
-                  if (isConnected) {
-                    statusText = 'Connected to';
-                    statusClass = 'bg-green-100 text-green-800 font-semibold';
-                  } else if (connecting || retrying) {
-                    statusText = `Connecting to`;
-                    statusClass = 'bg-yellow-100 text-yellow-800';
-                  }
+                if (isConnected) {
+                  statusText = 'LINKED';
+                  statusClasses = 'bg-[#d4edda] border-[#27ae60]';
+                } else if (connecting || retrying) {
+                  statusText = `LINKING...`;
+                  statusClasses = 'bg-[#fff3cd] border-[#f2c94c]';
+                }
 
-                  return (
-                    <li key={id} className={`${statusClass} ${baseClasses}`}>
-                      <span>
-                        {statusText} {id}
-                        {retrying && ` (Retry ${reconnectionAttempts[id]})`}
-                      </span>
-                      <button
-                        onClick={() => forgetPeer(id)}
-                        className="ml-2 px-3 py-1 bg-gray-200 text-gray-700 rounded-md text-xs hover:bg-gray-300"
-                        title="Forget this peer"
-                      >
-                        Forget
-                      </button>
-                    </li>
-                  );
-                })
-              )}
-            </ul>
+                return (
+                  <div key={id} className={`p-[0.8rem] mb-2 border-[3px] flex justify-between items-center break-all ${statusClasses}`}>
+                    <span className="text-xs mr-2">
+                      {statusText}
+                      {retrying && ` (RETRY ${reconnectionAttempts[id]})`}
+                      <br />
+                      {id}
+                    </span>
+                    <button
+                      onClick={() => forgetPeer(id)}
+                      className="py-[0.8rem] px-[1.2rem] border-[3px] text-center cursor-pointer uppercase active:not(:disabled):translate-y-[2px] disabled:bg-gray-200 disabled:text-gray-400 disabled:border-gray-400 disabled:cursor-not-allowed bg-[#eb5757] text-white border-black hover:not(:disabled):bg-[#f47f7f] text-xs !p-1"
+                      title="Forget this peer"
+                    >
+                      X
+                    </button>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 
-        {/* Right Column for Messaging */}
-        <div className="bg-white rounded-lg shadow-md p-6 flex flex-col">
-          <h2 className="text-2xl font-semibold text-gray-700 mb-3">Send a Message</h2>
-          <div className="flex items-center mb-4">
+        {/* Messaging Panel */}
+        <div className="bg-white border-[3px] border-black p-4 w-full">
+          <h2 className="text-lg font-bold mb-3">MESSAGES</h2>
+          <div className="flex items-center gap-2 mb-4">
             <input
               type="text"
               placeholder="Type a message..."
-              className="p-2 border border-gray-300 rounded-l-md w-full focus:ring-blue-500 focus:border-blue-500"
+              className="p-[0.8rem] border-[3px] border-black bg-white w-full text-[10px] focus:outline-[3px] focus:outline-[#2f80ed] focus:outline-offset-[-3px]"
               value={messageInput}
               onChange={(e) => setMessageInput(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
@@ -208,19 +208,18 @@ function App() {
             />
             <button
               onClick={handleSendMessage}
-              className="px-4 py-2 bg-green-500 text-white rounded-r-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50"
+              className="py-[0.8rem] px-[1.2rem] border-[3px] text-center cursor-pointer uppercase text-[10px] active:not(:disabled):translate-y-[2px] disabled:bg-gray-200 disabled:text-gray-400 disabled:border-gray-400 disabled:cursor-not-allowed bg-[#27ae60] text-white border-black hover:not(:disabled):bg-[#60c887]"
               disabled={connectedPeers.length === 0}
             >
-              Send to All
+              Send
             </button>
           </div>
-          <h3 className="text-xl font-semibold text-gray-700 mt-4 mb-2">Received Messages</h3>
-          <div className="list-none p-3 bg-gray-50 rounded-md h-64 overflow-y-auto">
+          <div className="bg-gray-200 border-[3px] border-black p-2 h-64 overflow-y-auto break-all">
             {messages.length === 0 ? (
-              <p className="text-gray-500 text-sm">No messages yet. Connect to a peer and start chatting!</p>
+              <p className="text-xs text-gray-500 p-2">No messages yet.</p>
             ) : (
               messages.map((message, index) => (
-                <p key={index} className="bg-white p-2 rounded-md mb-2 shadow-sm text-sm break-words">
+                <p key={index} className="bg-white p-2 mb-2 border-l-[3px] border-l-[#2f80ed] last:mb-0 text-sm">
                   {message}
                 </p>
               ))

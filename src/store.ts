@@ -1,45 +1,11 @@
 import { create } from 'zustand';
-import type { DataConnection } from 'peerjs'
+import type { DataConnection } from 'peerjs';
 import Peer from 'peerjs';
+import type { Group, GroupEvent, P2PMessage, PersistedGroup } from './types';
 
-// --- Helper Functions for Local Storage ---
-const MY_PEER_ID_KEY = 'myPeerId';
-const REMEMBERED_PEERS_KEY = 'rememberedPeerConnections';
-
-function getMyStoredPeerId(): string | null {
-  return localStorage.getItem(MY_PEER_ID_KEY);
-}
-
-function setMyStoredPeerId(id: string) {
-  localStorage.setItem(MY_PEER_ID_KEY, id);
-}
-
-export function getRememberedPeers(): string[] {
-  try {
-    const stored = localStorage.getItem(REMEMBERED_PEERS_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch (e) {
-    console.error("Failed to parse remembered peers from localStorage", e);
-    return [];
-  }
-}
-
-function addRememberedPeer(id: string) {
-  const currentPeers = getRememberedPeers();
-  if (!currentPeers.includes(id)) {
-    const newPeers = [...currentPeers, id];
-    localStorage.setItem(REMEMBERED_PEERS_KEY, JSON.stringify(newPeers));
-  }
-}
-
-function removeRememberedPeer(id: string) {
-  const currentPeers = getRememberedPeers();
-  const newPeers = currentPeers.filter(peerId => peerId !== id);
-  localStorage.setItem(REMEMBERED_PEERS_KEY, JSON.stringify(newPeers));
-}
+// --- Helper Functions ---
 
 function generateUUID(): string {
-  // For modern browsers, crypto.randomUUID() is preferred, but this is a good fallback.
   if (crypto && crypto.randomUUID) {
     return crypto.randomUUID();
   }
@@ -50,224 +16,379 @@ function generateUUID(): string {
   });
 }
 
+const P2P_GROUPS_KEY = 'p2p_groups';
+
+function getStoredGroups(): Record<string, PersistedGroup> {
+  try {
+    const stored = localStorage.getItem(P2P_GROUPS_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch (e) {
+    console.error("Failed to parse groups from localStorage", e);
+    return {};
+  }
+}
+
+function saveStoredGroups(groups: Record<string, Group>) {
+  const persistedGroups: Record<string, PersistedGroup> = {};
+  for (const groupId in groups) {
+    const { id, name, myPeerId, events } = groups[groupId];
+    persistedGroups[groupId] = { id, name, myPeerId, events };
+  }
+  localStorage.setItem(P2P_GROUPS_KEY, JSON.stringify(persistedGroups));
+}
+
 // --- Store Definition ---
 
 interface PeerState {
-  peer: Peer | null;
-  peerId: string;
-  connections: Record<string, DataConnection>;
-  messages: string[];
-  isConnecting: Record<string, boolean>;
-  reconnectionAttempts: Record<string, number>;
-  reconnectionTimers: Record<string, number>;
+  groups: Record<string, Group>;
+  activeGroupId: string | null;
 }
 
 interface PeerActions {
-  initializePeer: () => void;
-  destroyPeer: () => void;
-  connectToPeer: (remotePeerId: string, isRetry?: boolean) => void;
-  sendMessage: (message: string) => void;
-  forgetPeer: (peerIdToForget: string) => void;
+  initializeStore: () => void;
+  createGroup: (name: string) => void;
+  joinGroup: (inviteCode: string) => void;
+  leaveGroup: (groupId: string) => void;
+  setActiveGroup: (groupId: string | null) => void;
+  addEventAndBroadcast: (groupId: string, type: GroupEvent['type'], payload: any) => void;
+  sendMessage: (groupId: string, message: string) => void;
+  connectToPeer: (groupId: string, remotePeerId: string) => void;
+  destroyStore: () => void;
 }
 
-const MAX_RETRY_ATTEMPTS = 10;
-const RETRY_INTERVAL_BASE_MS = 3000;
+const turnUsername = "1757534482:testuser";
+const turnPassword = "mHGqjUySxm/JpHI223rBraoP3Z4=";
+const peerConfig = {
+  debug: 2,
+  config: {
+    iceServers: [
+      { urls: "turn:coturn.fubar.online:3478", username: turnUsername, credential: turnPassword },
+      { urls: "stun:coturn.fubar.online:3478" },
+    ],
+  },
+};
+
+// Sorts events deterministically to ensure consistent state across all peers
+const sortEvents = (events: GroupEvent[]) =>
+  [...events].sort((a, b) => {
+    if (a.timestamp !== b.timestamp) {
+      return a.timestamp - b.timestamp;
+    }
+    // Tie-break with author ID to prevent state divergence from simultaneous events
+    return a.authorPeerId.localeCompare(b.authorPeerId);
+  });
 
 export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
 
-  const addMessage = (message: string) => set(state => ({ messages: [...state.messages, message] }));
-
-  const setConnectionStatus = (peerId: string, status: boolean) => {
-    set(state => ({ isConnecting: { ...state.isConnecting, [peerId]: status } }));
-  };
-
-  const _scheduleReconnect = (remotePeer: string) => {
-    const { reconnectionAttempts, reconnectionTimers, connectToPeer } = get();
-    const attempts = (reconnectionAttempts[remotePeer] || 0) + 1;
-    set(state => ({ reconnectionAttempts: { ...state.reconnectionAttempts, [remotePeer]: attempts } }));
-
-    if (attempts <= MAX_RETRY_ATTEMPTS) {
-      const delay = RETRY_INTERVAL_BASE_MS * attempts;
-      console.warn(`Attempting to reconnect to ${remotePeer} (Attempt ${attempts}/${MAX_RETRY_ATTEMPTS}) in ${delay / 1000}s...`);
-
-      if (reconnectionTimers[remotePeer]) clearTimeout(reconnectionTimers[remotePeer]);
-
-      const newTimer = setTimeout(() => connectToPeer(remotePeer, true), delay);
-      set(state => ({ reconnectionTimers: { ...state.reconnectionTimers, [remotePeer]: newTimer } }));
-    } else {
-      console.error(`Max reconnection attempts reached for ${remotePeer}. Giving up.`);
-      const { reconnectionTimers: currentTimers, reconnectionAttempts: currentAttempts } = get();
-      if (currentTimers[remotePeer]) {
-        clearTimeout(currentTimers[remotePeer]);
-        const newTimers = { ...currentTimers };
-        delete newTimers[remotePeer];
-        const newAttempts = { ...currentAttempts };
-        delete newAttempts[remotePeer];
-        set({ reconnectionTimers: newTimers, reconnectionAttempts: newAttempts });
+  const _updateGroupState = (groupId: string, newProps: Partial<Group>) => {
+    set(state => {
+      if (!state.groups[groupId]) return state;
+      const updatedGroup = { ...state.groups[groupId], ...newProps };
+      const newGroups = { ...state.groups, [groupId]: updatedGroup };
+      // Persist changes to events or core properties
+      if (newProps.events || newProps.name) {
+        saveStoredGroups(newGroups);
       }
-    }
+      return { groups: newGroups };
+    });
   };
 
-  const setupConnectionListeners = (conn: DataConnection) => {
+  const _setupConnectionListeners = (conn: DataConnection, groupId: string) => {
+    const group = get().groups[groupId];
+    if (!group) return;
+
     conn.on('open', () => {
-      console.log(`Connection to ${conn.peer} is open.`);
-      set(state => ({ connections: { ...state.connections, [conn.peer]: conn } }));
-      setConnectionStatus(conn.peer, false);
-      addRememberedPeer(conn.peer);
+      console.log(`[${group.name}] Connection to ${conn.peer} is open.`);
+      _updateGroupState(groupId, {
+        connections: { ...group.connections, [conn.peer]: conn },
+        isConnecting: { ...group.isConnecting, [conn.peer]: false },
+      });
 
-      const { reconnectionTimers, reconnectionAttempts } = get();
-      if (reconnectionTimers[conn.peer]) {
-        clearTimeout(reconnectionTimers[conn.peer]);
-        const newTimers = { ...reconnectionTimers };
-        delete newTimers[conn.peer];
-        const newAttempts = { ...reconnectionAttempts };
-        delete newAttempts[conn.peer];
-        set({ reconnectionTimers: newTimers, reconnectionAttempts: newAttempts });
-      }
+      // --- Start Event Sourcing Sync ---
+      const eventIds = get().groups[groupId].events.map(e => e.id);
+      const syncRequest: P2PMessage = { type: 'SYNC_REQUEST', payload: { eventIds } };
+      conn.send(syncRequest);
+      console.log(`[${group.name}] Sent SYNC_REQUEST to ${conn.peer}`);
     });
 
     conn.on('data', (data) => {
-      console.log(`Received data from ${conn.peer}:`, data);
-      addMessage(`${conn.peer}: ${data as string}`);
+      const msg = data as P2PMessage;
+      const currentGroup = get().groups[groupId];
+      if (!currentGroup) return;
+
+      console.log(`[${currentGroup.name}] Received data from ${conn.peer}:`, msg.type);
+
+      switch (msg.type) {
+        case 'EVENT_BROADCAST': {
+          const newEvent = msg.payload.event;
+          const eventExists = currentGroup.events.some(e => e.id === newEvent.id);
+          if (!eventExists) {
+            const updatedEvents = sortEvents([...currentGroup.events, newEvent]);
+            _updateGroupState(groupId, { events: updatedEvents });
+          }
+          break;
+        }
+        case 'SYNC_REQUEST': {
+          const remoteEventIds = new Set(msg.payload.eventIds);
+          const missingEvents = currentGroup.events.filter(e => !remoteEventIds.has(e.id));
+          if (missingEvents.length > 0) {
+            const syncResponse: P2PMessage = { type: 'SYNC_RESPONSE', payload: { missingEvents } };
+            conn.send(syncResponse);
+            console.log(`[${currentGroup.name}] Sent SYNC_RESPONSE to ${conn.peer} with ${missingEvents.length} events.`);
+          }
+          break;
+        }
+        case 'SYNC_RESPONSE': {
+          const newEvents = msg.payload.missingEvents;
+          const existingEventIds = new Set(currentGroup.events.map(e => e.id));
+          const uniqueNewEvents = newEvents.filter(e => !existingEventIds.has(e.id));
+
+          if (uniqueNewEvents.length > 0) {
+            const updatedEvents = sortEvents([...currentGroup.events, ...uniqueNewEvents]);
+            const groupCreatedEvent = updatedEvents.find(e => e.type === 'GROUP_CREATED');
+            const groupName = groupCreatedEvent?.payload?.name;
+
+            const updatePayload: Partial<Group> = { events: updatedEvents };
+            if (groupName && currentGroup.name === 'Joining...') {
+              updatePayload.name = groupName;
+            }
+            _updateGroupState(groupId, updatePayload);
+            console.log(`[${currentGroup.name}] Applied ${uniqueNewEvents.length} new events from ${conn.peer}.`);
+
+            // After syncing, try to connect to all other members from the event log.
+            const allMembers = new Set(updatedEvents.map(e => e.authorPeerId));
+            const myPeerId = get().groups[groupId]?.myPeerId;
+            if (myPeerId) {
+              allMembers.forEach(memberPeerId => {
+                if (memberPeerId !== myPeerId) {
+                  get().connectToPeer(groupId, memberPeerId);
+                }
+              });
+            }
+          }
+          break;
+        }
+      }
     });
 
     conn.on('close', () => {
-      console.log(`Connection to ${conn.peer} has closed.`);
-      set(state => {
-        const newConns = { ...state.connections };
-        delete newConns[conn.peer];
-        return { connections: newConns };
-      });
-      setConnectionStatus(conn.peer, false);
-      if (getRememberedPeers().includes(conn.peer)) _scheduleReconnect(conn.peer);
+      console.log(`[${group.name}] Connection to ${conn.peer} has closed.`);
+      const { connections } = get().groups[groupId];
+      const newConns = { ...connections };
+      delete newConns[conn.peer];
+      _updateGroupState(groupId, { connections: newConns });
+      // Reconnect logic could be added here if desired
     });
 
     conn.on('error', (err) => {
-      console.error(`Connection error with ${conn.peer}:`, err);
-      setConnectionStatus(conn.peer, false);
-      if (getRememberedPeers().includes(conn.peer)) _scheduleReconnect(conn.peer);
+      console.error(`[${group.name}] Connection error with ${conn.peer}:`, err);
+      // Reconnect logic could be added here
     });
+  };
+
+  const _initializePeerForGroup = (groupId: string, peerToConnect?: string) => {
+    const group = get().groups[groupId];
+    if (!group || group.peer) return;
+
+    const peer = new Peer(group.myPeerId, peerConfig);
+    _updateGroupState(groupId, { peer });
+
+    peer.on('open', (id) => {
+      console.log(`[${group.name}] PeerJS instance ready with ID: ${id}`);
+
+      // If joining, connect to the inviting peer
+      if (peerToConnect) {
+        get().connectToPeer(groupId, peerToConnect);
+      }
+
+      // Auto-connect to other members of the group derived from the event log
+      const members = new Set(get().groups[groupId].events.map(e => e.authorPeerId));
+      members.forEach(memberPeerId => {
+        if (memberPeerId !== group.myPeerId && memberPeerId !== peerToConnect) {
+          get().connectToPeer(groupId, memberPeerId);
+        }
+      });
+    });
+
+    peer.on('connection', (conn) => {
+      console.log(`[${group.name}] Incoming connection from ${conn.peer}`);
+      _setupConnectionListeners(conn, groupId);
+    });
+
+    peer.on('error', (err) => console.error(`[${group.name}] PeerJS error:`, err));
   };
 
   return {
     // --- State ---
-    peer: null,
-    peerId: '',
-    connections: {},
-    messages: [],
-    isConnecting: {},
-    reconnectionAttempts: {},
-    reconnectionTimers: {},
+    groups: {},
+    activeGroupId: null,
 
     // --- Actions ---
-    initializePeer: () => {
-      if (get().peer) return;
+    initializeStore: () => {
+      const storedGroups = getStoredGroups();
+      const runtimeGroups: Record<string, Group> = {};
 
-      let storedId = getMyStoredPeerId();
-      if (!storedId) {
-        storedId = generateUUID();
-        setMyStoredPeerId(storedId);
-      }
-      const turnUsername = "1757534482:testuser";
-      const turnPassword = "mHGqjUySxm/JpHI223rBraoP3Z4=";
-      const peer = new Peer(storedId, {
-        debug: 3,
-        config: {
-          iceServers: [
-            // Your TURN server with credentials
-            {
-              urls: "turn:coturn.fubar.online:3478",
-              username: turnUsername,
-              credential: turnPassword,
-            },
-            // Your STUN server
-            {
-              urls: "stun:coturn.fubar.online:3478",
-            },
-            // // Fallback STUN servers
-            // {
-            //   urls: 'stun:stun.l.google.com:19302'
-            // },
-            // {
-            //   urls: 'stun:stun1.l.google.com:19302'
-            // },
-          ],
-        },
-      });
-
-      peer.on('open', (id) => {
-        console.log('My peer ID is: ' + id);
-        set({ peerId: id });
-        if (id !== storedId) setMyStoredPeerId(id);
-
-        getRememberedPeers().forEach(peerId => {
-          console.log(`Attempting to auto-reconnect to remembered peer: ${peerId}`);
-          get().connectToPeer(peerId);
-        });
-      });
-
-      peer.on('connection', (conn) => {
-        console.log(`Incoming connection from ${conn.peer}`);
-        setupConnectionListeners(conn);
-      });
-
-      peer.on('error', (err) => console.error('PeerJS error:', err));
-
-      set({ peer });
-    },
-
-    destroyPeer: () => {
-      const { peer, reconnectionTimers } = get();
-      if (peer) peer.destroy();
-      Object.values(reconnectionTimers).forEach(timer => clearTimeout(timer));
-      set({
-        peer: null, peerId: '', connections: {}, messages: [],
-        isConnecting: {}, reconnectionTimers: {}, reconnectionAttempts: {},
-      });
-    },
-
-    connectToPeer: (remotePeerId, isRetry = false) => {
-      const { peer, peerId, connections, isConnecting } = get();
-
-      if (!remotePeerId || remotePeerId === peerId || isConnecting[remotePeerId]) return;
-      if (connections[remotePeerId]?.open) return;
-
-      if (!peer) {
-        console.warn('Peer instance not ready. Retrying after a delay.');
-        setTimeout(() => get().connectToPeer(remotePeerId, isRetry), 500);
-        return;
+      for (const groupId in storedGroups) {
+        runtimeGroups[groupId] = {
+          ...storedGroups[groupId],
+          peer: null,
+          connections: {},
+          isConnecting: {},
+          reconnectionAttempts: {},
+          reconnectionTimers: {},
+        };
       }
 
-      console.log(`Connecting to ${remotePeerId}...`);
-      setConnectionStatus(remotePeerId, true);
-      const conn = peer.connect(remotePeerId, { reliable: true });
-      setupConnectionListeners(conn);
+      set({ groups: runtimeGroups });
+
+      // Initialize PeerJS for each group
+      Object.keys(runtimeGroups).forEach(groupId => _initializePeerForGroup(groupId));
     },
 
-    sendMessage: (message) => {
-      const { connections } = get();
-      if (message) {
-        addMessage(`You: ${message}`);
-        Object.values(connections).forEach(conn => {
-          if (conn.open) conn.send(message);
-        });
+    destroyStore: () => {
+      const { groups } = get();
+      Object.values(groups).forEach(group => {
+        group.peer?.destroy();
+      });
+      set({ groups: {}, activeGroupId: null });
+    },
+
+    createGroup: (name) => {
+      const groupId = generateUUID();
+      const myPeerId = generateUUID();
+
+      const creationEvent: GroupEvent = {
+        id: generateUUID(),
+        timestamp: Date.now(),
+        authorPeerId: myPeerId,
+        type: 'GROUP_CREATED',
+        payload: { name },
+      };
+
+      const newGroup: Group = {
+        id: groupId,
+        name,
+        myPeerId,
+        events: [creationEvent],
+        peer: null,
+        connections: {},
+        isConnecting: {},
+        reconnectionAttempts: {},
+        reconnectionTimers: {},
+      };
+
+      set(state => ({
+        groups: { ...state.groups, [groupId]: newGroup },
+        activeGroupId: groupId,
+      }));
+
+      saveStoredGroups(get().groups);
+      _initializePeerForGroup(groupId);
+    },
+
+    joinGroup: (inviteCode) => {
+      try {
+        const { groupId, peerId: remotePeerId } = JSON.parse(inviteCode);
+
+        if (!groupId || !remotePeerId) {
+          throw new Error("Invalid invite code format.");
+        }
+
+        if (get().groups[groupId]) {
+          console.warn(`Already a member of group ${groupId}. Connecting if not already connected.`);
+          get().connectToPeer(groupId, remotePeerId);
+          return;
+        }
+
+        const myPeerId = generateUUID();
+        const newGroup: Group = {
+          id: groupId,
+          name: 'Joining...', // Temporary name
+          myPeerId,
+          events: [],
+          peer: null,
+          connections: {},
+          isConnecting: {},
+          reconnectionAttempts: {},
+          reconnectionTimers: {},
+        };
+
+        set(state => ({
+          groups: { ...state.groups, [groupId]: newGroup },
+          activeGroupId: groupId,
+        }));
+
+        _initializePeerForGroup(groupId, remotePeerId);
+
+      } catch (e) {
+        console.error("Failed to join group with invite code:", e);
+        alert("Invalid invite code. Please check the code and try again.");
       }
     },
 
-    forgetPeer: (peerIdToForget) => {
-      const { connections, reconnectionTimers, reconnectionAttempts } = get();
-      connections[peerIdToForget]?.close();
-      removeRememberedPeer(peerIdToForget);
+    leaveGroup: (groupId) => {
+      set(state => {
+        const groupToLeave = state.groups[groupId];
+        if (!groupToLeave) return state;
 
-      if (reconnectionTimers[peerIdToForget]) {
-        clearTimeout(reconnectionTimers[peerIdToForget]);
-        const newTimers = { ...reconnectionTimers };
-        delete newTimers[peerIdToForget];
-        const newAttempts = { ...reconnectionAttempts };
-        delete newAttempts[peerIdToForget];
-        set({ reconnectionTimers: newTimers, reconnectionAttempts: newAttempts });
-      }
-      console.log(`Forgot peer: ${peerIdToForget}`);
+        groupToLeave.peer?.destroy();
+
+        const newGroups = { ...state.groups };
+        delete newGroups[groupId];
+
+        const newActiveGroupId = state.activeGroupId === groupId ? null : state.activeGroupId;
+
+        saveStoredGroups(newGroups);
+
+        return {
+          groups: newGroups,
+          activeGroupId: newActiveGroupId,
+        };
+      });
+    },
+
+    setActiveGroup: (groupId) => {
+      set({ activeGroupId: groupId });
+    },
+
+    addEventAndBroadcast: (groupId, type, payload) => {
+      const group = get().groups[groupId];
+      if (!group) return;
+
+      const newEvent: GroupEvent = {
+        id: generateUUID(),
+        timestamp: Date.now(),
+        authorPeerId: group.myPeerId,
+        type,
+        payload,
+      };
+
+      const updatedEvents = sortEvents([...group.events, newEvent]);
+      _updateGroupState(groupId, { events: updatedEvents });
+
+      // Broadcast to all connected peers in the group
+      const broadcastMessage: P2PMessage = { type: 'EVENT_BROADCAST', payload: { event: newEvent } };
+      Object.values(group.connections).forEach(conn => {
+        if (conn?.open) {
+          conn.send(broadcastMessage);
+        }
+      });
+    },
+
+    sendMessage: (groupId, text) => {
+      get().addEventAndBroadcast(groupId, 'MESSAGE_ADDED', { text });
+    },
+
+    connectToPeer: (groupId, remotePeerId) => {
+      const group = get().groups[groupId];
+      if (!group || !group.peer || !remotePeerId || remotePeerId === group.myPeerId) return;
+      if (group.connections[remotePeerId]?.open || group.isConnecting[remotePeerId]) return;
+
+      console.log(`[${group.name}] Attempting to connect to ${remotePeerId}...`);
+      _updateGroupState(groupId, { isConnecting: { ...group.isConnecting, [remotePeerId]: true } });
+
+      const conn = group.peer.connect(remotePeerId, { reliable: true });
+      _setupConnectionListeners(conn, groupId);
     },
   };
 });

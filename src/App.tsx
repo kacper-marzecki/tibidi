@@ -281,6 +281,9 @@ function App() {
                   const isYou = peerId === activeGroup.myPeerId;
                   const isConnected = activeGroup.connections[peerId]?.open;
                   const isConnecting = activeGroup.isConnecting[peerId];
+                  // const reconnectAttempts = activeGroup.reconnectionAttempts[peerId] || 0;
+                  // const isReconnecting = reconnectAttempts > 0;
+
                   let statusText = 'OFFLINE';
                   let statusClasses = 'bg-[#f8d7da] border-[#eb5757]';
                   if (isYou) {
@@ -292,6 +295,9 @@ function App() {
                   } else if (isConnecting) {
                     statusText = 'LINKING...';
                     statusClasses = 'bg-[#fff3cd] border-[#f2c94c]';
+                    // } else if (isReconnecting) {
+                    //   statusText = `RECONNECTING... (${reconnectAttempts})`;
+                    //   statusClasses = 'bg-[#fff3cd] border-[#f2c94c]';
                   }
                   return (
                     <div key={peerId} className={`p-[0.8rem] mb-2 border-[3px] flex justify-between items-center break-all ${statusClasses}`}>

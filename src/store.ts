@@ -79,6 +79,7 @@ const sortEvents = (events: GroupEvent[]) =>
   });
 
 export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
+  let reconnectInterval: number | undefined;
 
   const _updateGroupState = (groupId: string, newProps: Partial<Group>) => {
     set(state => {
@@ -94,11 +95,12 @@ export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
   };
 
   const _setupConnectionListeners = (conn: DataConnection, groupId: string) => {
-    const group = get().groups[groupId];
-    if (!group) return;
-
     conn.on('open', () => {
+      const group = get().groups[groupId];
+      if (!group) return;
+
       console.log(`[${group.name}] Connection to ${conn.peer} is open.`);
+
       _updateGroupState(groupId, {
         connections: { ...group.connections, [conn.peer]: conn },
         isConnecting: { ...group.isConnecting, [conn.peer]: false },
@@ -172,17 +174,30 @@ export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
     });
 
     conn.on('close', () => {
+      const group = get().groups[groupId];
+      if (!group) return; // Group was left, no need to reconnect.
+
       console.log(`[${group.name}] Connection to ${conn.peer} has closed.`);
-      const { connections } = get().groups[groupId];
-      const newConns = { ...connections };
+
+      const newConns = { ...group.connections };
       delete newConns[conn.peer];
-      _updateGroupState(groupId, { connections: newConns });
-      // Reconnect logic could be added here if desired
+
+      const newConnecting = { ...group.isConnecting };
+      delete newConnecting[conn.peer]; // Clear connecting flag on close
+
+      _updateGroupState(groupId, {
+        connections: newConns,
+        isConnecting: newConnecting,
+      });
+
+      // The global timer will handle reconnection.
     });
 
     conn.on('error', (err) => {
+      const group = get().groups[groupId];
+      if (!group) return;
       console.error(`[${group.name}] Connection error with ${conn.peer}:`, err);
-      // Reconnect logic could be added here
+      // Reconnect logic is handled by the 'close' event, which usually follows 'error'.
     });
   };
 
@@ -234,8 +249,6 @@ export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
           peer: null,
           connections: {},
           isConnecting: {},
-          reconnectionAttempts: {},
-          reconnectionTimers: {},
         };
       }
 
@@ -243,9 +256,36 @@ export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
 
       // Initialize PeerJS for each group
       Object.keys(runtimeGroups).forEach(groupId => _initializePeerForGroup(groupId));
+
+      // Start periodic reconnection check
+      if (reconnectInterval) clearInterval(reconnectInterval);
+      reconnectInterval = window.setInterval(() => {
+        const { groups, connectToPeer } = get();
+        for (const groupId in groups) {
+          const group = groups[groupId];
+          if (!group.peer) continue;
+
+          const allMemberIds = new Set(group.events.map(e => e.authorPeerId));
+          allMemberIds.forEach(memberId => {
+            if (memberId === group.myPeerId) return;
+
+            const isConnected = group.connections[memberId]?.open;
+            const isConnecting = group.isConnecting[memberId];
+
+            if (!isConnected && !isConnecting) {
+              console.log(`[${group.name}] Periodic check: attempting to connect to ${memberId}`);
+              connectToPeer(groupId, memberId);
+            }
+          });
+        }
+      }, 5000);
     },
 
     destroyStore: () => {
+      if (reconnectInterval) {
+        clearInterval(reconnectInterval);
+        reconnectInterval = undefined;
+      }
       const { groups } = get();
       Object.values(groups).forEach(group => {
         group.peer?.destroy();
@@ -273,8 +313,6 @@ export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
         peer: null,
         connections: {},
         isConnecting: {},
-        reconnectionAttempts: {},
-        reconnectionTimers: {},
       };
 
       set(state => ({
@@ -309,8 +347,6 @@ export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
           peer: null,
           connections: {},
           isConnecting: {},
-          reconnectionAttempts: {},
-          reconnectionTimers: {},
         };
 
         set(state => ({

@@ -24,8 +24,6 @@ export interface Group extends PersistedGroup {
   peer: Peer | null;
   connections: Record<string, DataConnection>;
   isConnecting: Record<string, boolean>;
-  reconnectionAttempts: Record<string, number>;
-  reconnectionTimers: Record<string, number>;
 }
 
 // --- P2P Message Types for Synchronization ---

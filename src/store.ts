@@ -44,7 +44,7 @@ function getStoredState(): PersistedState {
   }
 }
 
-function saveStoredState(state: PeerState) {
+function saveStoredState(state: Omit<PeerState, 'logs'>) {
   if (Object.keys(state.groups).length == 0) {
     return
   }

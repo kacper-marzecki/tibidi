@@ -170,7 +170,7 @@ function App() {
 
   const chatMessages = activeGroup ? selectChatMessages(activeGroup.events, activeGroup.myPeerId) : [];
   const groupMembers = selectGroupMembers(activeGroup);
-  const connectedPeers = activeGroup ? Object.keys(activeGroup.connections).filter(p => activeGroup.connections[p]?.open) : [];
+  // const connectedPeers = activeGroup ? Object.keys(activeGroup.connections).filter(p => activeGroup.connections[p]?.open) : [];
   const qrValue = activeGroup ? JSON.stringify({ groupId: activeGroup.id, peerId: activeGroup.myPeerId }) : '';
 
   return (

@@ -81,7 +81,7 @@ interface PeerActions {
   addEventAndBroadcast: (groupId: string, type: GroupEvent['type'], payload: any) => void;
   sendMessage: (groupId: string, message: string) => void;
   connectToPeer: (groupId: string, remotePeerId: string) => void;
-  removePeer: (groupId: string, remotePeerId: string) => void;
+  forgetMember: (groupId: string, memberPeerId: string) => void;
   destroyStore: () => void;
   log: (...msg: any[]) => void;
 }
@@ -616,6 +616,30 @@ export const usePeerStore = create<PeerState & PeerActions>((set, get) => {
 
       const conn = group.peer.connect(remotePeerId, { reliable: true });
       _setupConnectionListeners(conn, groupId, remotePeerId);
+    },
+
+    forgetMember: (groupId, memberPeerId) => {
+      const { groups, log } = get();
+      const group = groups[groupId];
+      if (!group) return;
+
+      log(`[${group.name}] Forgetting member ${memberPeerId}.`);
+
+      // Close any connection to the forgotten peer
+      const connection = group.connections[memberPeerId];
+      if (connection) {
+        connection.close();
+      }
+
+      // Filter out all events authored by the forgotten member
+      const remainingEvents = group.events.filter(e => e.authorPeerId !== memberPeerId);
+
+      _updateGroupState(groupId, {
+        events: remainingEvents,
+        connections: removeKey(group.connections, memberPeerId),
+        isConnecting: removeKey(group.isConnecting, memberPeerId),
+        lastHeardFrom: removeKey(group.lastHeardFrom, memberPeerId),
+      });
     },
   };
 });

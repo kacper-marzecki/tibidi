@@ -49,6 +49,7 @@ function App() {
     setActiveGroup,
     connectToPeer,
     sendMessage,
+    forgetMember,
     logs
   } = usePeerStore();
 
@@ -158,6 +159,12 @@ function App() {
     if (messageInput && activeGroupId) {
       sendMessage(activeGroupId, messageInput);
       setMessageInput('');
+    }
+  };
+
+  const handleForgetMember = (groupId: string, memberPeerId: string) => {
+    if (window.confirm(`Are you sure you want to forget this member (${memberPeerId})? All their contributions (messages, etc.) will be permanently removed from your local view of this group.`)) {
+      forgetMember(groupId, memberPeerId);
     }
   };
 
@@ -302,7 +309,15 @@ function App() {
                   }
                   return (
                     <div key={peerId} className={`p-[0.8rem] mb-2 border-[3px] flex justify-between items-center break-all ${statusClasses}`}>
-                      <span className="text-xs mr-2">{statusText}<br />{peerId}</span>
+                      <span className="text-xs mr-2 flex-grow">{statusText}<br />{peerId}</span>
+                      {!isYou && activeGroup && (
+                        <button
+                          onClick={() => handleForgetMember(activeGroup.id, peerId)}
+                          className="py-[0.4rem] px-[0.8rem] border-[2px] text-center cursor-pointer uppercase text-[10px] active:not(:disabled):translate-y-[2px] bg-[#f2c94c] text-black border-black hover:not(:disabled):bg-[#f5d573] ml-2 flex-shrink-0"
+                        >
+                          Forget
+                        </button>
+                      )}
                     </div>
                   );
                 })}

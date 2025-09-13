@@ -5,7 +5,7 @@ import { usePeerStore } from './store';
 import type { ChatMessage, Group, GroupEvent } from './types';
 
 // --- Routing Helpers ---
-const TABS = ['Groups', 'Pairing', 'Chat', 'Tasks', 'Settings'];
+const TABS = ['Groups', 'Pairing', 'Chat', 'Tasks', 'Settings', 'Log'];
 
 const getTabFromHash = () => {
   const hash = window.location.hash.substring(1).toLowerCase();
@@ -49,6 +49,7 @@ function App() {
     setActiveGroup,
     connectToPeer,
     sendMessage,
+    logs
   } = usePeerStore();
 
   const activeGroup = activeGroupId ? groups[activeGroupId] : undefined;
@@ -338,7 +339,16 @@ function App() {
           {activeGroup && activeTab === 'Settings' && (
             <div><h2 className="text-lg font-bold mb-3">SETTINGS</h2><p className="text-xs text-gray-500">This feature is not yet implemented.</p></div>
           )}
+
+          {activeGroup && activeTab === 'Log' && (
+            <div className="text-sm flex flex-col gap-2">
+              {logs.map(l => <div >
+                {`${l}`}
+              </div>)}
+            </div>
+          )}
         </div>
+
 
         {/* Tab Buttons */}
         <div className="flex border-t-[3px] border-black">

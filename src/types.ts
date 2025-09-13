@@ -7,7 +7,7 @@ export interface GroupEvent {
   id: string;          // Unique ID for the event (e.g., UUID)
   timestamp: number;   // Milliseconds since epoch. Used for ordering.
   authorPeerId: string;      // The peerId of the user who created the event
-  type: 'GROUP_CREATED' | 'MESSAGE_ADDED'; // Add more types like 'TASK_ADDED' later
+  type: 'GROUP_CREATED' | 'MESSAGE_ADDED' | 'MEMBER_LEFT'; // Add more types like 'TASK_ADDED' later
   payload: any;        // Data specific to the event (e.g., { name: 'My Group' } or { text: 'Hello!' })
 }
 
@@ -29,7 +29,8 @@ export interface PersistedState {
 export interface Group extends PersistedGroup {
   peer: Peer | null;
   connections: Record<string, DataConnection>;
-  isConnecting: Record<string, boolean>;
+  isConnecting: Record<string, number>; // Timestamp of when connection attempt started
+  lastHeardFrom: Record<string, number>; // Timestamp of last message from a peer
 }
 
 // --- P2P Message Types for Synchronization ---
@@ -37,7 +38,9 @@ export interface Group extends PersistedGroup {
 export type P2PMessage =
   | { type: 'SYNC_REQUEST'; payload: { eventIds: string[] } }
   | { type: 'SYNC_RESPONSE'; payload: { missingEvents: GroupEvent[] } }
-  | { type: 'EVENT_BROADCAST'; payload: { event: GroupEvent } };
+  | { type: 'EVENT_BROADCAST'; payload: { event: GroupEvent } }
+  | { type: 'PING' }
+  | { type: 'PONG' };
 
 // --- Derived State Types (for UI) ---
 

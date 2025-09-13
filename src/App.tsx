@@ -3,6 +3,27 @@ import { QRCodeSVG } from 'qrcode.react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { usePeerStore, getRememberedPeers } from './store';
 
+// --- Routing Helpers ---
+const TABS = ['Pairing', 'Chat', 'Tasks', 'Settings'];
+
+/**
+ * Gets the current tab from the URL hash, defaulting to 'Pairing'.
+ */
+const getTabFromHash = () => {
+  const hash = window.location.hash.substring(1).toLowerCase();
+  const tab = TABS.find(t => t.toLowerCase() === hash);
+  return tab || 'Pairing';
+};
+
+/**
+ * Navigates to a new tab by updating the URL hash.
+ * @param tab The tab to navigate to.
+ */
+const navigateTo = (tab: string) => {
+  window.location.hash = tab.toLowerCase();
+};
+
+
 function App() {
   // --- State from Zustand store ---
   const {
@@ -22,7 +43,8 @@ function App() {
   const [remotePeerIdInput, setRemotePeerIdInput] = useState('');
   const [messageInput, setMessageInput] = useState('');
   const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('Pairing');
+  // Active tab is now derived from the URL hash
+  const [activeTab, setActiveTab] = useState(getTabFromHash());
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
@@ -34,6 +56,21 @@ function App() {
       destroyPeer();
     };
   }, [initializePeer, destroyPeer]);
+
+  // --- Effect for handling URL hash changes (Routing) ---
+  useEffect(() => {
+    const handleHashChange = () => {
+      setActiveTab(getTabFromHash());
+    };
+
+    // Set initial state and listen for changes
+    handleHashChange();
+    window.addEventListener('hashchange', handleHashChange);
+
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+    };
+  }, []); // Empty dependency array ensures this runs only once
 
   // --- Auto-scroll messages ---
   useEffect(() => {
@@ -48,7 +85,7 @@ function App() {
         setRemotePeerIdInput(decodedText);
         connectToPeer(decodedText);
         setIsScannerOpen(false);
-        setActiveTab('Pairing'); // Switch to pairing tab after scan
+        navigateTo('Pairing'); // Switch to pairing tab after scan
       };
 
       const scanner = new Html5QrcodeScanner(
@@ -89,7 +126,6 @@ function App() {
 
   const connectedPeers = Object.keys(connections);
   const allRememberedPeers = getRememberedPeers();
-  const TABS = ['Pairing', 'Chat', 'Tasks', 'Settings'];
 
   return (
     // max-w-lg mx-auto md:max-w-full md:mx-0
@@ -262,7 +298,7 @@ function App() {
           {TABS.map(tab => (
             <button
               key={tab}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => navigateTo(tab)}
               className={`flex-1 py-[0.8rem] px-[0.5rem] border-r-[3px] border-black last:border-r-0 text-center cursor-pointer uppercase text-[10px] font-bold focus:outline-none ${activeTab === tab
                 ? 'bg-white text-black'
                 : 'bg-gray-200 text-gray-600 hover:bg-gray-300'

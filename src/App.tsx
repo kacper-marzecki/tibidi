@@ -92,7 +92,8 @@ function App() {
   const TABS = ['Pairing', 'Chat', 'Tasks', 'Settings'];
 
   return (
-    <div className="p-4 max-w-lg mx-auto flex flex-col gap-6">
+    // max-w-lg mx-auto md:max-w-full md:mx-0
+    <div className="flex flex-col gap-6">
       {/* Scanner Modal */}
       {isScannerOpen && (
         <div className="fixed inset-0 bg-black/75 flex justify-center items-center z-50 p-4">
@@ -109,28 +110,10 @@ function App() {
         </div>
       )}
 
-      <h1 className="text-2xl font-bold text-center uppercase">P2P Link</h1>
-
       {/* Tabbed Interface */}
-      <div className="bg-white border-[3px] border-black w-full">
-        {/* Tab Buttons */}
-        <div className="flex border-b-[3px] border-black">
-          {TABS.map(tab => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`flex-1 py-[0.8rem] px-[0.5rem] border-r-[3px] border-black last:border-r-0 text-center cursor-pointer uppercase text-[10px] font-bold focus:outline-none ${activeTab === tab
-                  ? 'bg-white text-black'
-                  : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
-                }`}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
-
+      <div className="bg-white border-[3px] border-black w-full flex flex-col h-screen">
         {/* Tab Content */}
-        <div className="p-4">
+        <div className="p-4 overflow-y-auto h-full">
           {activeTab === 'Pairing' && (
             <div className="flex flex-col gap-6">
               {/* Your Device Panel */}
@@ -223,6 +206,19 @@ function App() {
             <div>
               {/* Messaging Panel */}
               <div>
+                <div className="bg-gray-200 border-[3px] border-black p-2 h-full overflow-y-auto break-all">
+                  {messages.length === 0 ? (
+                    <p className="text-xs text-gray-500 p-2">No messages yet.</p>
+                  ) : (
+                    messages.map((message, index) => (
+                      <p key={index} className="bg-white p-2 mb-2 border-l-[3px] border-l-[#2f80ed] last:mb-0 text-sm">
+                        {message}
+                      </p>
+                    ))
+                  )}
+                  <div ref={messagesEndRef} />
+                </div>
+
                 <h2 className="text-lg font-bold mb-3">MESSAGES</h2>
                 <div className="flex items-center gap-2 mb-4">
                   <input
@@ -242,18 +238,6 @@ function App() {
                     Send
                   </button>
                 </div>
-                <div className="bg-gray-200 border-[3px] border-black p-2 h-64 overflow-y-auto break-all">
-                  {messages.length === 0 ? (
-                    <p className="text-xs text-gray-500 p-2">No messages yet.</p>
-                  ) : (
-                    messages.map((message, index) => (
-                      <p key={index} className="bg-white p-2 mb-2 border-l-[3px] border-l-[#2f80ed] last:mb-0 text-sm">
-                        {message}
-                      </p>
-                    ))
-                  )}
-                  <div ref={messagesEndRef} />
-                </div>
               </div>
             </div>
           )}
@@ -271,6 +255,22 @@ function App() {
               <p className="text-xs text-gray-500">This feature is not yet implemented.</p>
             </div>
           )}
+        </div>
+
+        {/* Tab Buttons */}
+        <div className="flex border-t-[3px] border-black">
+          {TABS.map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`flex-1 py-[0.8rem] px-[0.5rem] border-r-[3px] border-black last:border-r-0 text-center cursor-pointer uppercase text-[10px] font-bold focus:outline-none ${activeTab === tab
+                ? 'bg-white text-black'
+                : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                }`}
+            >
+              {tab}
+            </button>
+          ))}
         </div>
       </div>
     </div>
